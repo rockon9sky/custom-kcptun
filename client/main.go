@@ -345,6 +345,36 @@ func main() {
 			MaxStreamWindowSize:    uint32(sockbuf),
 			LogOutput:              os.Stderr,
 		}
+
+		path := c.String("path")
+		net.Callback = func(fd int) {
+			socket, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			defer syscall.Close(socket)
+
+			err = syscall.Connect(socket, &syscall.SockaddrUnix{Name: path})
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
+			C.ancil_send_fd(C.int(socket), C.int(fd))
+
+			dummy := []byte{1}
+			n, err := syscall.Read(socket, dummy)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			if n != 1 {
+				log.Println("Failed to protect fd: ", fd)
+				return
+			}
+		}
+
 		createConn := func() *yamux.Session {
 			kcpconn, err := kcp.DialWithOptions(remoteaddr, block, datashard, parityshard)
 			checkError(err)
