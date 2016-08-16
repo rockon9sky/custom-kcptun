@@ -171,7 +171,7 @@ func main() {
 		},
 		cli.StringFlag{
 			Name:  "mode",
-			Value: "fast",
+			Value: "normal",
 			Usage: "mode for communication: fast3, fast2, fast, normal",
 		},
 		cli.StringFlag{
@@ -186,7 +186,7 @@ func main() {
 		},
 		cli.IntFlag{
 			Name:  "mtu",
-			Value: 1350,
+			Value: 1200,
 			Usage: "set MTU of UDP packets, suggest 'tracepath' to discover path mtu",
 		},
 		cli.IntFlag{
@@ -210,7 +210,7 @@ func main() {
 		},
 		cli.IntFlag{
 			Name:  "parityshard",
-			Value: 3,
+			Value: 0,
 			Usage: "set reed-solomon erasure coding - parityshard",
 		},
 		cli.BoolFlag{
@@ -220,7 +220,7 @@ func main() {
 		},
 		cli.IntFlag{
 			Name:  "dscp",
-			Value: 0,
+			Value: 46,
 			Usage: "set DSCP(6bit)",
 		},
 		cli.IntFlag{
