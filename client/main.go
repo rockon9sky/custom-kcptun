@@ -58,7 +58,6 @@ import (
 	"net"
 	"os"
     "syscall"
-	"runtime"
 	"time"
 
 	"golang.org/x/crypto/pbkdf2"
@@ -342,7 +341,6 @@ func main() {
 			}
 		}
 
-		go gcTask(gcinterval)
 		config := &yamux.Config{
 			AcceptBacklog:          256,
 			EnableKeepAlive:        true,
