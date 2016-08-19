@@ -166,7 +166,7 @@ func main() {
 		cli.StringFlag{
 			Name:  "crypt",
 			Value: "aes",
-			Usage: "methods for encryption: aes, aes-128, aes-192, tea, xor, none",
+			Usage: "aes, aes-128, aes-192, blowfish, cast5, 3des, tea, xor, none",
 		},
 		cli.StringFlag{
 			Name:  "mode",
@@ -288,6 +288,12 @@ func main() {
 			block, _ = kcp.NewAESBlockCrypt(pass[:16])
 		case "aes-192":
 			block, _ = kcp.NewAESBlockCrypt(pass[:24])
+		case "blowfish":
+			block, _ = kcp.NewBlowfishBlockCrypt(pass)
+		case "cast5":
+			block, _ = kcp.NewCast5BlockCrypt(pass[:16])
+		case "3des":
+			block, _ = kcp.NewTripleDESBlockCrypt(pass[:24])
 		default:
 			block, _ = kcp.NewAESBlockCrypt(pass)
 		}
@@ -390,41 +396,14 @@ func main() {
 		for {
 			p1, err := listener.AcceptTCP()
 			checkError(err)
-
-			var p2 net.Conn
-			if mux := muxes[rr%numconn]; mux == nil {
-				// mux cache miss, create one
-				mux = createConn()
-				p2, err = mux.Open()
-				if err != nil {
-					// new mux open failed, close
-					log.Printf("yamux open failed: %s, close", err)
-					mux.Close()
-					p1.Close()
-					continue
-				}
-				// new mux open succ, put into cache
-				muxes[rr%numconn] = mux
-			} else {
-				// cache hit, try to open the mux in cache
-				p2, err = mux.Open()
-				if err != nil {
-					// cached mux open failed, close it and create a new one
-					log.Printf("yamux open failed: %s, retry", err)
-					mux.Close()
-					muxes[rr%numconn] = nil // clear cache
-					mux = createConn()
-					p2, err = mux.Open()
-					if err != nil {
-						// new mux open fail again, close
-						log.Printf("yamux open failed again: %s, close", err)
-						mux.Close()
-						p1.Close()
-						continue
-					}
-					// new mux open succ, put into cache
-					muxes[rr%numconn] = mux
-				}
+			mux := muxes[rr%numconn]
+			p2, err := mux.Open()
+			if err != nil { // yamux failure
+				log.Println(err)
+				p1.Close()
+				muxes[rr%numconn] = createConn()
+				mux.Close()
+				continue
 			}
 			go handleClient(p1, p2)
 			rr++
