@@ -160,7 +160,7 @@ func main() {
 		cli.StringFlag{
 			Name:   "key",
 			Value:  "it's a secrect",
-			Usage:  "key for communcation, must be the same as kcptun server",
+			Usage:  "pre-shared secret for client and server",
 			EnvVar: "KCPTUN_KEY",
 		},
 		cli.StringFlag{
@@ -171,7 +171,7 @@ func main() {
 		cli.StringFlag{
 			Name:  "mode",
 			Value: "fast",
-			Usage: "mode for communication: fast3, fast2, fast, normal",
+			Usage: "profiles: fast3, fast2, fast, normal",
 		},
 		cli.StringFlag{
 			Name:  "path",
@@ -181,12 +181,12 @@ func main() {
 		cli.IntFlag{
 			Name:  "conn",
 			Value: 1,
-			Usage: "establish N physical connections as specified by 'conn' to server",
+			Usage: "set num of UDP connections to server",
 		},
 		cli.IntFlag{
 			Name:  "mtu",
 			Value: 1350,
-			Usage: "set MTU of UDP packets, suggest 'tracepath' to discover path mtu",
+			Usage: "set maximum transmission unit of UDP packets",
 		},
 		cli.IntFlag{
 			Name:  "sndwnd",
@@ -198,13 +198,9 @@ func main() {
 			Value: 1024,
 			Usage: "set receive window size(num of packets)",
 		},
-		cli.BoolFlag{
-			Name:  "nocomp",
-			Usage: "disable compression",
-		},
 		cli.IntFlag{
 			Name:  "datashard",
-			Value: 10,
+			Value: 7,
 			Usage: "set reed-solomon erasure coding - datashard",
 		},
 		cli.IntFlag{
@@ -221,6 +217,10 @@ func main() {
 			Name:  "dscp",
 			Value: 0,
 			Usage: "set DSCP(6bit)",
+		},
+		cli.BoolFlag{
+			Name:  "nocomp",
+			Usage: "disable compression",
 		},
 		cli.IntFlag{
 			Name:   "nodelay",
