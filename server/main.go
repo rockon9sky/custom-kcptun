@@ -13,8 +13,8 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/hashicorp/yamux"
+	kcp "github.com/madeye/kcp-go"
 	"github.com/urfave/cli"
-	kcp "github.com/xtaci/kcp-go"
 )
 
 var (
@@ -179,6 +179,10 @@ func main() {
 			Name:  "nocomp",
 			Usage: "disable compression",
 		},
+		cli.BoolFlag{
+			Name:  "sid",
+			Usage: "enable session id",
+		},
 		cli.IntFlag{
 			Name:   "nodelay",
 			Value:  0,
@@ -248,8 +252,10 @@ func main() {
 			block, _ = kcp.NewAESBlockCrypt(pass)
 		}
 
+		hasSid := c.Bool("sid")
+
 		datashard, parityshard := c.Int("datashard"), c.Int("parityshard")
-		lis, err := kcp.ListenWithOptions(c.String("listen"), block, datashard, parityshard)
+		lis, err := kcp.ListenWithOptions(c.String("listen"), hasSid, block, datashard, parityshard)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -264,6 +270,7 @@ func main() {
 		log.Println("nodelay parameters:", nodelay, interval, resend, nc)
 		log.Println("sndwnd:", sndwnd, "rcvwnd:", rcvwnd)
 		log.Println("compression:", !nocomp)
+		log.Println("session id:", hasSid)
 		log.Println("mtu:", mtu)
 		log.Println("datashard:", datashard, "parityshard:", parityshard)
 		log.Println("acknodelay:", acknodelay)
