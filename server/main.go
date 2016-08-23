@@ -12,9 +12,9 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/golang/snappy"
-	"github.com/hashicorp/yamux"
 	kcp "github.com/madeye/kcp-go"
 	"github.com/urfave/cli"
+	"github.com/xtaci/yamux"
 )
 
 var (
