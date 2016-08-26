@@ -12,8 +12,8 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/golang/snappy"
-	kcp "github.com/madeye/kcp-go"
 	"github.com/urfave/cli"
+	kcp "github.com/xtaci/kcp-go"
 	"github.com/xtaci/yamux"
 )
 
@@ -187,10 +187,6 @@ func main() {
 			Name:  "nocomp",
 			Usage: "disable compression",
 		},
-		cli.BoolFlag{
-			Name:  "sid",
-			Usage: "enable session id",
-		},
 		cli.IntFlag{
 			Name:   "nodelay",
 			Value:  0,
@@ -267,10 +263,8 @@ func main() {
 			block, _ = kcp.NewAESBlockCrypt(pass)
 		}
 
-		hasSid := c.Bool("sid")
-
 		datashard, parityshard := c.Int("datashard"), c.Int("parityshard")
-		lis, err := kcp.ListenWithOptions(c.String("listen"), hasSid, block, datashard, parityshard)
+		lis, err := kcp.ListenWithOptions(c.String("listen"), block, datashard, parityshard)
 		if err != nil {
 			log.Fatal(err)
 		}
