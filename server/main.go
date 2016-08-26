@@ -279,7 +279,6 @@ func main() {
 		log.Println("nodelay parameters:", nodelay, interval, resend, nc)
 		log.Println("sndwnd:", sndwnd, "rcvwnd:", rcvwnd)
 		log.Println("compression:", !nocomp)
-		log.Println("session id:", hasSid)
 		log.Println("mtu:", mtu)
 		log.Println("datashard:", datashard, "parityshard:", parityshard)
 		log.Println("acknodelay:", acknodelay)
