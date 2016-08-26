@@ -1,7 +1,7 @@
 # <img src="logo.png" alt="kcptun" height="60px" /> 
-[![GoDoc][1]][2] [![Release][13]][14] [![Powered][17]][18] [![MIT licensed][11]][12] [![Build Status][3]][4] [![Go Report Card][5]][6] [![Downloads][15]][16] [![Gitter][19]][20]
-[1]: https://godoc.org/github.com/xtaci/kcptun?status.svg
-[2]: https://godoc.org/github.com/xtaci/kcptun
+[![Release][13]][14] [![Powered][17]][18] [![MIT licensed][11]][12] [![Build Status][3]][4] [![Go Report Card][5]][6] [![Downloads][15]][16] [![Gitter][19]][20] [![Docker][1]][2]
+[1]: https://images.microbadger.com/badges/image/xtaci/kcptun.svg
+[2]: https://microbadger.com/images/xtaci/kcptun
 [3]: https://travis-ci.org/xtaci/kcptun.svg?branch=master
 [4]: https://travis-ci.org/xtaci/kcptun
 [5]: https://goreportcard.com/badge/github.com/xtaci/kcptun
@@ -40,7 +40,9 @@ Client Side: ./client_darwin_amd64 -r "SERVERIP:4000" -l ":1080" -mode fast2  //
 * WIFI: 5GHz TL-WDR3320
 
 ### *Usage* :lollipop:
+Help output under MacOS X:
 ```
+$ ./client_darwin_amd64 -h
 NAME:
    kcptun - kcptun client
 
@@ -48,7 +50,7 @@ USAGE:
    client_darwin_amd64 [global options] command [command options] [arguments...]
 
 VERSION:
-   20160816
+   20160820
 
 COMMANDS:
      help, h  Shows a list of commands or help for one command
@@ -56,22 +58,22 @@ COMMANDS:
 GLOBAL OPTIONS:
    --localaddr value, -l value   local listen address (default: ":12948")
    --remoteaddr value, -r value  kcp server address (default: "vps:29900")
-   --key value                   key for communcation, must be the same as kcptun server (default: "it's a secrect") [$KCPTUN_KEY]
-   --crypt value                 methods for encryption: aes, aes-128, aes-192, tea, xor, none (default: "aes")
-   --mode value                  mode for communication: fast3, fast2, fast, normal (default: "fast")
-   --conn value                  establish N physical connections as specified by 'conn' to server (default: 1)
-   --mtu value                   set MTU of UDP packets, suggest 'tracepath' to discover path mtu (default: 1350)
+   --key value                   pre-shared secret for client and server (default: "it's a secrect") [$KCPTUN_KEY]
+   --crypt value                 aes, aes-128, aes-192, salsa20, blowfish, twofish, cast5, 3des, tea, xtea, xor, none (default: "aes")
+   --mode value                  profiles: fast3, fast2, fast, normal (default: "fast")
+   --conn value                  set num of UDP connections to server (default: 1)
+   --mtu value                   set maximum transmission unit of UDP packets (default: 1350)
    --sndwnd value                set send window size(num of packets) (default: 128)
    --rcvwnd value                set receive window size(num of packets) (default: 1024)
-   --nocomp                      disable compression
    --datashard value             set reed-solomon erasure coding - datashard (default: 10)
    --parityshard value           set reed-solomon erasure coding - parityshard (default: 3)
    --dscp value                  set DSCP(6bit) (default: 0)
+   --nocomp                      disable compression
    --help, -h                    show help
    --version, -v                 print the version
-```
 
-```
+
+$ ./server_darwin_amd64 -h
 NAME:
    kcptun - kcptun server
 
@@ -79,7 +81,7 @@ USAGE:
    server_darwin_amd64 [global options] command [command options] [arguments...]
 
 VERSION:
-   20160816
+   20160820
 
 COMMANDS:
      help, h  Shows a list of commands or help for one command
@@ -87,16 +89,16 @@ COMMANDS:
 GLOBAL OPTIONS:
    --listen value, -l value  kcp server listen address (default: ":29900")
    --target value, -t value  target server address (default: "127.0.0.1:12948")
-   --key value               key for communcation, must be the same as kcptun client (default: "it's a secrect") [$KCPTUN_KEY]
-   --crypt value             methods for encryption: aes, aes-128, aes-192, tea, xor, none (default: "aes")
-   --mode value              mode for communication: fast3, fast2, fast, normal (default: "fast")
-   --mtu value               set MTU of UDP packets, suggest 'tracepath' to discover path mtu (default: 1350)
+   --key value               pre-shared secret for client and server (default: "it's a secrect") [$KCPTUN_KEY]
+   --crypt value             aes, aes-128, aes-192, salsa20, blowfish, twofish, cast5, 3des, tea, xtea, xor, none (default: "aes")
+   --mode value              profiles: fast3, fast2, fast, normal (default: "fast")
+   --mtu value               set maximum transmission unit of UDP packets (default: 1350)
    --sndwnd value            set send window size(num of packets) (default: 1024)
    --rcvwnd value            set receive window size(num of packets) (default: 1024)
-   --nocomp                  disable compression
    --datashard value         set reed-solomon erasure coding - datashard (default: 10)
    --parityshard value       set reed-solomon erasure coding - parityshard (default: 3)
    --dscp value              set DSCP(6bit) (default: 0)
+   --nocomp                  disable compression
    --help, -h                show help
    --version, -v             print the version
 ```
@@ -121,6 +123,12 @@ other parameters can be set independently.
 > Step 2：Try download something and observer, if the bandwidth usage is close the limit then stop, otherwise goto step 1.     
 
 ***NOTICE: if too much retranmission happens, it's quite possible the windows are too large***
+
+### *Security* :lollipop: 
+No matter what encryption you are using for application layer, if you specify ```-crypt none``` to kcptun, 
+the header will be ***PLAINTEXT*** to everyone; I suggest ```-crypt aes-128``` for encryption at least .
+
+NOTICE: ```-crypt xor``` is also insecure, do not use this unless you know what you are doing.
 
 ### *Memory Control* :lollipop: 
 Routers, mobile devices are sensitive to memory consumption; by setting GOGC environment(eg: GOGC=20) will lower memory consumption.

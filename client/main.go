@@ -57,6 +57,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -160,13 +161,13 @@ func main() {
 		cli.StringFlag{
 			Name:   "key",
 			Value:  "it's a secrect",
-			Usage:  "pre-shared secret for client and server",
+			Usage:  "pre-shared secret between client and server",
 			EnvVar: "KCPTUN_KEY",
 		},
 		cli.StringFlag{
 			Name:  "crypt",
 			Value: "aes",
-			Usage: "aes, aes-128, aes-192, blowfish, cast5, 3des, tea, xor, none",
+			Usage: "aes, aes-128, aes-192, salsa20, blowfish, twofish, cast5, 3des, tea, xtea, xor, none",
 		},
 		cli.StringFlag{
 			Name:  "mode",
@@ -184,9 +185,14 @@ func main() {
 			Usage: "set num of UDP connections to server",
 		},
 		cli.IntFlag{
+			Name:  "autoexpire",
+			Value: 0,
+			Usage: "set auto expiration time(in seconds) for a single UDP connection, 0 to disable",
+		},
+		cli.IntFlag{
 			Name:  "mtu",
 			Value: 1350,
-			Usage: "set maximum transmission unit of UDP packets",
+			Usage: "set maximum transmission unit for UDP packets",
 		},
 		cli.IntFlag{
 			Name:  "sndwnd",
@@ -200,7 +206,7 @@ func main() {
 		},
 		cli.IntFlag{
 			Name:  "datashard",
-			Value: 7,
+			Value: 10,
 			Usage: "set reed-solomon erasure coding - datashard",
 		},
 		cli.IntFlag{
@@ -294,11 +300,18 @@ func main() {
 			block, _ = kcp.NewAESBlockCrypt(pass[:24])
 		case "blowfish":
 			block, _ = kcp.NewBlowfishBlockCrypt(pass)
+		case "twofish":
+			block, _ = kcp.NewTwofishBlockCrypt(pass)
 		case "cast5":
 			block, _ = kcp.NewCast5BlockCrypt(pass[:16])
 		case "3des":
 			block, _ = kcp.NewTripleDESBlockCrypt(pass[:24])
+		case "xtea":
+			block, _ = kcp.NewXTEABlockCrypt(pass[:16])
+		case "salsa20":
+			block, _ = kcp.NewSalsa20BlockCrypt(pass)
 		default:
+			crypt = "aes"
 			block, _ = kcp.NewAESBlockCrypt(pass)
 		}
 
@@ -308,6 +321,7 @@ func main() {
 		nocomp, acknodelay := c.Bool("nocomp"), c.Bool("acknodelay")
 		dscp, sockbuf, keepalive, conn := c.Int("dscp"), c.Int("sockbuf"), c.Int("keepalive"), c.Int("conn")
 		hasSid := c.Bool("sid")
+		autoexpire := c.Int("autoexpire")
 
 		log.Println("listening on:", listener.Addr())
 		log.Println("encryption:", crypt)
@@ -323,6 +337,7 @@ func main() {
 		log.Println("sockbuf:", sockbuf)
 		log.Println("keepalive:", keepalive)
 		log.Println("conn:", conn)
+		log.Println("autoexpire:", autoexpire)
 
 		path := c.String("path")
 		net.Callback = func(fd int) {
@@ -389,27 +404,47 @@ func main() {
 				session, err = yamux.Client(newCompStream(kcpconn), config)
 			}
 			checkError(err)
+			runtime.SetFinalizer(session, func(s *yamux.Session) {
+				s.Close()
+			})
 			return session
 		}
 
 		numconn := uint16(conn)
-		var muxes []*yamux.Session
-		for i := uint16(0); i < numconn; i++ {
-			muxes = append(muxes, createConn())
+		muxes := make([]struct {
+			session *yamux.Session
+			ttl     time.Time
+		}, numconn)
+
+		for k := range muxes {
+			muxes[k].session = createConn()
+			muxes[k].ttl = time.Now().Add(time.Duration(autoexpire) * time.Second)
 		}
 
 		rr := uint16(0)
 		for {
 			p1, err := listener.AcceptTCP()
+			if err := p1.SetReadBuffer(sockbuf); err != nil {
+				log.Println("TCP SetReadBuffer:", err)
+			}
+			if err := p1.SetWriteBuffer(sockbuf); err != nil {
+				log.Println("TCP SetWriteBuffer:", err)
+			}
 			checkError(err)
-			mux := muxes[rr%numconn]
-			p2, err := mux.Open()
+			idx := rr % numconn
+			mux := muxes[idx]
+			p2, err := mux.session.Open()
 			if err != nil { // yamux failure
 				log.Println(err)
 				p1.Close()
-				muxes[rr%numconn] = createConn()
-				mux.Close()
+				muxes[idx].session = createConn()
+				muxes[idx].ttl = time.Now().Add(time.Duration(autoexpire) * time.Second)
 				continue
+			}
+			if autoexpire > 0 && time.Now().After(muxes[idx].ttl) { // auto expiration
+				log.Println("autoexpired")
+				muxes[idx].session = createConn()
+				muxes[idx].ttl = time.Now().Add(time.Duration(autoexpire) * time.Second)
 			}
 			go handleClient(p1, p2)
 			rr++

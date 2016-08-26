@@ -61,18 +61,26 @@ func handleMux(conn io.ReadWriteCloser, target string, config *yamux.Config) {
 		return
 	}
 	defer mux.Close()
-
 	for {
 		p1, err := mux.Accept()
 		if err != nil {
 			log.Println(err)
 			return
 		}
+		sockbuf := int(config.MaxStreamWindowSize)
 		p2, err := net.DialTimeout("tcp", target, 5*time.Second)
 		if err != nil {
 			log.Println(err)
 			return
 		}
+
+		if err := p2.(*net.TCPConn).SetReadBuffer(sockbuf); err != nil {
+			log.Println("TCP SetReadBuffer:", err)
+		}
+		if err := p2.(*net.TCPConn).SetWriteBuffer(sockbuf); err != nil {
+			log.Println("TCP SetWriteBuffer:", err)
+		}
+
 		go handleClient(p1, p2)
 	}
 }
@@ -127,13 +135,13 @@ func main() {
 		cli.StringFlag{
 			Name:   "key",
 			Value:  "it's a secrect",
-			Usage:  "pre-shared secret for client and server",
+			Usage:  "pre-shared secret between client and server",
 			EnvVar: "KCPTUN_KEY",
 		},
 		cli.StringFlag{
 			Name:  "crypt",
 			Value: "aes",
-			Usage: "aes, aes-128, aes-192, blowfish, cast5, 3des, tea, xor, none",
+			Usage: "aes, aes-128, aes-192, salsa20, blowfish, twofish, cast5, 3des, tea, xtea, xor, none",
 		},
 		cli.StringFlag{
 			Name:  "mode",
@@ -143,7 +151,7 @@ func main() {
 		cli.IntFlag{
 			Name:  "mtu",
 			Value: 1350,
-			Usage: "set maximum transmission unit of UDP packets",
+			Usage: "set maximum transmission unit for UDP packets",
 		},
 		cli.IntFlag{
 			Name:  "sndwnd",
@@ -157,7 +165,7 @@ func main() {
 		},
 		cli.IntFlag{
 			Name:  "datashard",
-			Value: 7,
+			Value: 10,
 			Usage: "set reed-solomon erasure coding - datashard",
 		},
 		cli.IntFlag{
@@ -244,11 +252,18 @@ func main() {
 			block, _ = kcp.NewAESBlockCrypt(pass[:24])
 		case "blowfish":
 			block, _ = kcp.NewBlowfishBlockCrypt(pass)
+		case "twofish":
+			block, _ = kcp.NewTwofishBlockCrypt(pass)
 		case "cast5":
 			block, _ = kcp.NewCast5BlockCrypt(pass[:16])
 		case "3des":
 			block, _ = kcp.NewTripleDESBlockCrypt(pass[:24])
+		case "xtea":
+			block, _ = kcp.NewXTEABlockCrypt(pass[:16])
+		case "salsa20":
+			block, _ = kcp.NewSalsa20BlockCrypt(pass)
 		default:
+			crypt = "aes"
 			block, _ = kcp.NewAESBlockCrypt(pass)
 		}
 
@@ -296,7 +311,7 @@ func main() {
 			LogOutput:              os.Stderr,
 		}
 		for {
-			if conn, err := lis.Accept(); err == nil {
+			if conn, err := lis.AcceptKCP(); err == nil {
 				log.Println("remote address:", conn.RemoteAddr())
 				conn.SetStreamMode(true)
 				conn.SetNoDelay(nodelay, interval, resend, nc)
