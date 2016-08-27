@@ -47,6 +47,16 @@ ancil_send_fd(int sock, int fd)
     return(ancil_send_fds_with_buffer(sock, &fd, 1, &buffer));
 }
 
+void
+set_timeout(int sock)
+{
+    struct timeval tv;
+    tv.tv_sec  = 1;
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv, sizeof(struct timeval));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char *)&tv, sizeof(struct timeval));
+}
+
 */
 import "C"
 
@@ -341,6 +351,8 @@ func main() {
 				return
 			}
 			defer syscall.Close(socket)
+
+			C.set_timeout(C.int(socket))
 
 			err = syscall.Connect(socket, &syscall.SockaddrUnix{Name: path})
 			if err != nil {
