@@ -149,7 +149,8 @@ func checkError(err error) {
 }
 
 func main() {
-    android_init()
+
+    log_init()
 
 	rand.Seed(int64(time.Now().Nanosecond()))
 	if VERSION == "SELFBUILD" {
