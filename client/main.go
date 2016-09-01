@@ -150,8 +150,6 @@ func checkError(err error) {
 
 func main() {
 
-	log_init()
-
 	rand.Seed(int64(time.Now().Nanosecond()))
 	if VERSION == "SELFBUILD" {
 		// add more log flags for debugging
@@ -324,6 +322,8 @@ func main() {
 			crypt = "aes"
 			block, _ = kcp.NewAESBlockCrypt(pass)
 		}
+
+		log_init()
 
 		remoteaddr := c.String("remoteaddr")
 		datashard, parityshard := c.Int("datashard"), c.Int("parityshard")
