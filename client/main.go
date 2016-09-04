@@ -68,7 +68,6 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -77,7 +76,7 @@ import (
 	"github.com/golang/snappy"
 	"github.com/urfave/cli"
 	kcp "github.com/xtaci/kcp-go"
-	"github.com/xtaci/yamux"
+	"github.com/xtaci/smux"
 )
 
 var (
@@ -157,7 +156,7 @@ func main() {
 	}
 	myApp := cli.NewApp()
 	myApp.Name = "kcptun"
-	myApp.Usage = "kcptun client"
+	myApp.Usage = "client(with SMUX)"
 	myApp.Version = VERSION
 	myApp.Flags = []cli.Flag{
 		cli.StringFlag{
@@ -400,15 +399,10 @@ func main() {
 			}
 		}
 
-		yconfig := &yamux.Config{
-			AcceptBacklog:          256,
-			EnableKeepAlive:        true,
-			KeepAliveInterval:      30 * time.Second,
-			ConnectionWriteTimeout: 10 * time.Second,
-			MaxStreamWindowSize:    uint32(config.SockBuf),
-			LogOutput:              os.Stderr,
-		}
-		createConn := func() *yamux.Session {
+		smuxConfig := smux.DefaultConfig()
+		smuxConfig.MaxReceiveBuffer = config.SockBuf
+
+		createConn := func() *smux.Session {
 			kcpconn, err := kcp.DialWithOptions(config.RemoteAddr, block, config.DataShard, config.ParityShard)
 			checkError(err)
 			kcpconn.SetStreamMode(true)
@@ -429,22 +423,19 @@ func main() {
 			}
 
 			// stream multiplex
-			var session *yamux.Session
+			var session *smux.Session
 			if config.NoComp {
-				session, err = yamux.Client(kcpconn, yconfig)
+				session, err = smux.Client(kcpconn, smuxConfig)
 			} else {
-				session, err = yamux.Client(newCompStream(kcpconn), yconfig)
+				session, err = smux.Client(newCompStream(kcpconn), smuxConfig)
 			}
 			checkError(err)
-			runtime.SetFinalizer(session, func(s *yamux.Session) {
-				s.Close()
-			})
 			return session
 		}
 
 		numconn := uint16(config.Conn)
 		muxes := make([]struct {
-			session *yamux.Session
+			session *smux.Session
 			ttl     time.Time
 		}, numconn)
 
@@ -453,6 +444,8 @@ func main() {
 			muxes[k].ttl = time.Now().Add(time.Duration(config.AutoExpire) * time.Second)
 		}
 
+		chScavenger := make(chan *smux.Session, 128)
+		go scavenger(chScavenger)
 		rr := uint16(0)
 		for {
 			p1, err := listener.AcceptTCP()
@@ -468,14 +461,15 @@ func main() {
 		OPEN_P2:
 			// do auto expiration
 			if config.AutoExpire > 0 && time.Now().After(muxes[idx].ttl) {
-				log.Println("autoexpired")
+				chScavenger <- muxes[idx].session
 				muxes[idx].session = createConn()
 				muxes[idx].ttl = time.Now().Add(time.Duration(config.AutoExpire) * time.Second)
 			}
 
 			// do session open
-			p2, err := muxes[idx].session.Open()
-			if err != nil { // yamux failure
+			p2, err := muxes[idx].session.OpenStream()
+			if err != nil { // mux failure
+				chScavenger <- muxes[idx].session
 				muxes[idx].session = createConn()
 				muxes[idx].ttl = time.Now().Add(time.Duration(config.AutoExpire) * time.Second)
 				goto OPEN_P2
@@ -485,4 +479,37 @@ func main() {
 		}
 	}
 	myApp.Run(os.Args)
+}
+
+type scavengeSession struct {
+	session *smux.Session
+	ttl     time.Time
+}
+
+const (
+	maxScavengeTTL = 10 * time.Minute
+)
+
+func scavenger(ch chan *smux.Session) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	var sessionList []scavengeSession
+	for {
+		select {
+		case sess := <-ch:
+			sessionList = append(sessionList, scavengeSession{sess, time.Now()})
+		case <-ticker.C:
+			var newList []scavengeSession
+			for k := range sessionList {
+				s := sessionList[k]
+				if s.session.NumStreams() == 0 || s.session.IsClosed() || time.Now().Sub(s.ttl) > maxScavengeTTL {
+					log.Println("session scavenged")
+					s.session.Close()
+				} else {
+					newList = append(newList, sessionList[k])
+				}
+			}
+			sessionList = newList
+		}
+	}
 }
