@@ -74,6 +74,7 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/golang/snappy"
+	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 	kcp "github.com/xtaci/kcp-go"
 	"github.com/xtaci/smux"
@@ -122,16 +123,10 @@ func handleClient(p1, p2 io.ReadWriteCloser) {
 
 	// start tunnel
 	p1die := make(chan struct{})
-	go func() {
-		io.Copy(p1, p2)
-		close(p1die)
-	}()
+	go func() { io.Copy(p1, p2); close(p1die) }()
 
 	p2die := make(chan struct{})
-	go func() {
-		io.Copy(p2, p1)
-		close(p2die)
-	}()
+	go func() { io.Copy(p2, p1); close(p2die) }()
 
 	// wait for tunnel termination
 	select {
@@ -300,7 +295,7 @@ func main() {
 		config.KeepAlive = c.Int("keepalive")
 
 		if c.String("c") != "" {
-			err := parseJsonConfig(&config, c.String("c"))
+			err := parseJSONConfig(&config, c.String("c"))
 			checkError(err)
 		}
 
@@ -402,9 +397,11 @@ func main() {
 		smuxConfig := smux.DefaultConfig()
 		smuxConfig.MaxReceiveBuffer = config.SockBuf
 
-		createConn := func() *smux.Session {
+		createConn := func() (*smux.Session, error) {
 			kcpconn, err := kcp.DialWithOptions(config.RemoteAddr, block, config.DataShard, config.ParityShard)
-			checkError(err)
+			if err != nil {
+				return nil, errors.Wrap(err, "createConn()")
+			}
 			kcpconn.SetStreamMode(true)
 			kcpconn.SetNoDelay(config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
 			kcpconn.SetWindowSize(config.SndWnd, config.RcvWnd)
@@ -429,8 +426,21 @@ func main() {
 			} else {
 				session, err = smux.Client(newCompStream(kcpconn), smuxConfig)
 			}
-			checkError(err)
-			return session
+			if err != nil {
+				return nil, errors.Wrap(err, "createConn()")
+			}
+			return session, nil
+		}
+
+		// wait until a connection is ready
+		waitConn := func() *smux.Session {
+			for {
+				if session, err := createConn(); err == nil {
+					return session
+				} else {
+					time.Sleep(time.Second)
+				}
+			}
 		}
 
 		numconn := uint16(config.Conn)
@@ -440,7 +450,9 @@ func main() {
 		}, numconn)
 
 		for k := range muxes {
-			muxes[k].session = createConn()
+			sess, err := createConn()
+			checkError(err)
+			muxes[k].session = sess
 			muxes[k].ttl = time.Now().Add(time.Duration(config.AutoExpire) * time.Second)
 		}
 
@@ -462,7 +474,7 @@ func main() {
 			// do auto expiration
 			if config.AutoExpire > 0 && time.Now().After(muxes[idx].ttl) {
 				chScavenger <- muxes[idx].session
-				muxes[idx].session = createConn()
+				muxes[idx].session = waitConn()
 				muxes[idx].ttl = time.Now().Add(time.Duration(config.AutoExpire) * time.Second)
 			}
 
@@ -470,7 +482,7 @@ func main() {
 			p2, err := muxes[idx].session.OpenStream()
 			if err != nil { // mux failure
 				chScavenger <- muxes[idx].session
-				muxes[idx].session = createConn()
+				muxes[idx].session = waitConn()
 				muxes[idx].ttl = time.Now().Add(time.Duration(config.AutoExpire) * time.Second)
 				goto OPEN_P2
 			}
@@ -502,7 +514,7 @@ func scavenger(ch chan *smux.Session) {
 			var newList []scavengeSession
 			for k := range sessionList {
 				s := sessionList[k]
-				if s.session.NumStreams() == 0 || s.session.IsClosed() || time.Now().Sub(s.ttl) > maxScavengeTTL {
+				if s.session.NumStreams() == 0 || s.session.IsClosed() || time.Since(s.ttl) > maxScavengeTTL {
 					log.Println("session scavenged")
 					s.session.Close()
 				} else {
