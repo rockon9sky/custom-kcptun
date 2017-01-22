@@ -63,6 +63,8 @@ import "C"
 
 import (
 	"crypto/sha1"
+	"encoding/csv"
+	"fmt"
 	"io"
 	"log"
 	"math/rand"
@@ -115,7 +117,12 @@ func newCompStream(conn net.Conn) *compStream {
 	return c
 }
 
-func handleClient(p1, p2 io.ReadWriteCloser) {
+func handleClient(sess *smux.Session, p1 io.ReadWriteCloser) {
+	p2, err := sess.OpenStream()
+	if err != nil {
+		return
+	}
+
 	log.Println("stream opened")
 	defer log.Println("stream closed")
 	defer p1.Close()
@@ -207,16 +214,16 @@ func main() {
 		},
 		cli.IntFlag{
 			Name:  "rcvwnd",
-			Value: 1024,
+			Value: 512,
 			Usage: "set receive window size(num of packets)",
 		},
 		cli.IntFlag{
-			Name:  "datashard",
+			Name:  "datashard,ds",
 			Value: 10,
 			Usage: "set reed-solomon erasure coding - datashard",
 		},
 		cli.IntFlag{
-			Name:  "parityshard",
+			Name:  "parityshard,ps",
 			Value: 3,
 			Usage: "set reed-solomon erasure coding - parityshard",
 		},
@@ -265,6 +272,16 @@ func main() {
 			Hidden: true,
 		},
 		cli.StringFlag{
+			Name:  "snmplog",
+			Value: "",
+			Usage: "collect snmp to file, aware of timeformat in golang, like: ./snmp-20060102.log",
+		},
+		cli.IntFlag{
+			Name:  "snmpperiod",
+			Value: 60,
+			Usage: "snmp collect period, in seconds",
+		},
+		cli.StringFlag{
 			Name:  "log",
 			Value: "",
 			Usage: "specify a log file to output, default goes to stderr",
@@ -299,6 +316,8 @@ func main() {
 		config.SockBuf = c.Int("sockbuf")
 		config.KeepAlive = c.Int("keepalive")
 		config.Log = c.String("log")
+		config.SnmpLog = c.String("snmplog")
+		config.SnmpPeriod = c.Int("snmpperiod")
 
 		if c.String("c") != "" {
 			err := parseJSONConfig(&config, c.String("c"))
@@ -376,6 +395,8 @@ func main() {
 		log.Println("keepalive:", config.KeepAlive)
 		log.Println("conn:", config.Conn)
 		log.Println("autoexpire:", config.AutoExpire)
+		log.Println("snmplog:", config.SnmpLog)
+		log.Println("snmpperiod:", config.SnmpPeriod)
 
 		path := c.String("path")
 		net.Callback = func(fd int) {
@@ -472,9 +493,13 @@ func main() {
 
 		chScavenger := make(chan *smux.Session, 128)
 		go scavenger(chScavenger)
+		go snmpLogger(config.SnmpLog, config.SnmpPeriod)
 		rr := uint16(0)
 		for {
 			p1, err := listener.AcceptTCP()
+			if err != nil {
+				log.Fatalln(err)
+			}
 			if err := p1.SetReadBuffer(config.SockBuf); err != nil {
 				log.Println("TCP SetReadBuffer:", err)
 			}
@@ -484,23 +509,14 @@ func main() {
 			checkError(err)
 			idx := rr % numconn
 
-		OPEN_P2:
-			// do auto expiration
-			if config.AutoExpire > 0 && time.Now().After(muxes[idx].ttl) {
+			// do auto expiration && reconnection
+			if muxes[idx].session.IsClosed() || (config.AutoExpire > 0 && time.Now().After(muxes[idx].ttl)) {
 				chScavenger <- muxes[idx].session
 				muxes[idx].session = waitConn()
 				muxes[idx].ttl = time.Now().Add(time.Duration(config.AutoExpire) * time.Second)
 			}
 
-			// do session open
-			p2, err := muxes[idx].session.OpenStream()
-			if err != nil { // mux failure
-				chScavenger <- muxes[idx].session
-				muxes[idx].session = waitConn()
-				muxes[idx].ttl = time.Now().Add(time.Duration(config.AutoExpire) * time.Second)
-				goto OPEN_P2
-			}
-			go handleClient(p1, p2)
+			go handleClient(muxes[idx].session, p1)
 			rr++
 		}
 	}
@@ -536,6 +552,37 @@ func scavenger(ch chan *smux.Session) {
 				}
 			}
 			sessionList = newList
+		}
+	}
+}
+
+func snmpLogger(path string, interval int) {
+	if path == "" || interval == 0 {
+		return
+	}
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			f, err := os.OpenFile(time.Now().Format(path), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			w := csv.NewWriter(f)
+			// write header in empty file
+			if stat, err := f.Stat(); err == nil && stat.Size() == 0 {
+				if err := w.Write(append([]string{"Unix"}, kcp.DefaultSnmp.Header()...)); err != nil {
+					log.Println(err)
+				}
+			}
+			if err := w.Write(append([]string{fmt.Sprint(time.Now().Unix())}, kcp.DefaultSnmp.ToSlice()...)); err != nil {
+				log.Println(err)
+			}
+			kcp.DefaultSnmp.Reset()
+			w.Flush()
+			f.Close()
 		}
 	}
 }
