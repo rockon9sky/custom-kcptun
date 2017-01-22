@@ -188,11 +188,6 @@ func main() {
 			Value: "fast",
 			Usage: "profiles: fast3, fast2, fast, normal",
 		},
-		cli.StringFlag{
-			Name:  "path",
-			Value: "/data/data/com.github.shadowsocks/protect_path",
-			Usage: "path to shadowsocks data dir",
-		},
 		cli.IntFlag{
 			Name:  "conn",
 			Value: 1,
@@ -327,7 +322,8 @@ func main() {
 		}
 
 		opts, err := parseEnv()
-		if err != nil {
+		if err == nil {
+			fmt.Printf("test")
 			if c, b := opts.Get("localaddr"); b {
 				config.LocalAddr = c
 			}
@@ -510,8 +506,9 @@ func main() {
 		log.Println("snmplog:", config.SnmpLog)
 		log.Println("snmpperiod:", config.SnmpPeriod)
 
-		path := c.String("path")
-		net.Callback = func(fd int) {
+		path := "protect_path"
+
+		callback := func(fd int) {
 			socket, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 			if err != nil {
 				log.Println(err)
@@ -540,6 +537,8 @@ func main() {
 				return
 			}
 		}
+
+		SetNetCallback(callback)
 
 		smuxConfig := smux.DefaultConfig()
 		smuxConfig.MaxReceiveBuffer = config.SockBuf
