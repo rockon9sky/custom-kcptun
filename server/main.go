@@ -452,6 +452,7 @@ func main() {
 		}
 
 		go snmpLogger(config.SnmpLog, config.SnmpPeriod)
+		go parentMonitor(3)
 		for {
 			if conn, err := lis.AcceptKCP(); err == nil {
 				log.Println("remote address:", conn.RemoteAddr())
@@ -473,6 +474,21 @@ func main() {
 		}
 	}
 	myApp.Run(os.Args)
+}
+
+func parentMonitor(interval int) {
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	defer ticker.Stop()
+	pid := os.Getppid()
+	for {
+		select {
+		case <-ticker.C:
+			curpid := os.Getppid()
+			if curpid != pid {
+				os.Exit(1)
+			}
+		}
+	}
 }
 
 func snmpLogger(path string, interval int) {
