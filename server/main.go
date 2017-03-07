@@ -461,7 +461,6 @@ func main() {
 				conn.SetMtu(config.MTU)
 				conn.SetWindowSize(config.SndWnd, config.RcvWnd)
 				conn.SetACKNoDelay(config.AckNodelay)
-				conn.SetKeepAlive(config.KeepAlive)
 
 				if config.NoComp {
 					go handleMux(conn, &config)
