@@ -8,13 +8,15 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"strconv"
 	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 
-	"github.com/klauspost/compress/snappy"
+	"github.com/golang/snappy"
 	"github.com/urfave/cli"
 	kcp "github.com/xtaci/kcp-go"
 	"github.com/xtaci/smux"
@@ -26,6 +28,11 @@ var (
 	// SALT is use for pbkdf2 key expansion
 	SALT = "kcp-go"
 )
+
+// global recycle buffer
+var copyBuf sync.Pool
+
+const bufSize = 4096
 
 type compStream struct {
 	conn net.Conn
@@ -60,6 +67,8 @@ func handleMux(conn io.ReadWriteCloser, config *Config) {
 	// stream multiplex
 	smuxConfig := smux.DefaultConfig()
 	smuxConfig.MaxReceiveBuffer = config.SockBuf
+	smuxConfig.KeepAliveInterval = time.Duration(config.KeepAlive) * time.Second
+
 	mux, err := smux.Server(conn, smuxConfig)
 	if err != nil {
 		log.Println(err)
@@ -78,12 +87,6 @@ func handleMux(conn io.ReadWriteCloser, config *Config) {
 			log.Println(err)
 			continue
 		}
-		if err := p2.(*net.TCPConn).SetReadBuffer(config.SockBuf); err != nil {
-			log.Println("TCP SetReadBuffer:", err)
-		}
-		if err := p2.(*net.TCPConn).SetWriteBuffer(config.SockBuf); err != nil {
-			log.Println("TCP SetWriteBuffer:", err)
-		}
 		go handleClient(p1, p2)
 	}
 }
@@ -96,10 +99,20 @@ func handleClient(p1, p2 io.ReadWriteCloser) {
 
 	// start tunnel
 	p1die := make(chan struct{})
-	go func() { io.Copy(p1, p2); close(p1die) }()
+	go func() {
+		buf := copyBuf.Get().([]byte)
+		io.CopyBuffer(p1, p2, buf)
+		close(p1die)
+		copyBuf.Put(buf)
+	}()
 
 	p2die := make(chan struct{})
-	go func() { io.Copy(p2, p1); close(p2die) }()
+	go func() {
+		buf := copyBuf.Get().([]byte)
+		io.CopyBuffer(p2, p1, buf)
+		close(p2die)
+		copyBuf.Put(buf)
+	}()
 
 	// wait for tunnel termination
 	select {
@@ -117,6 +130,9 @@ func checkError(err error) {
 
 func main() {
 	rand.Seed(int64(time.Now().Nanosecond()))
+	copyBuf.New = func() interface{} {
+		return make([]byte, bufSize)
+	}
 	if VERSION == "SELFBUILD" {
 		// add more log flags for debugging
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -150,7 +166,7 @@ func main() {
 		cli.StringFlag{
 			Name:  "mode",
 			Value: "fast",
-			Usage: "profiles: fast3, fast2, fast, normal",
+			Usage: "profiles: fast3, fast2, fast, normal, manual",
 		},
 		cli.IntFlag{
 			Name:  "mtu",
@@ -198,7 +214,7 @@ func main() {
 		},
 		cli.IntFlag{
 			Name:   "interval",
-			Value:  40,
+			Value:  50,
 			Hidden: true,
 		},
 		cli.IntFlag{
@@ -231,6 +247,10 @@ func main() {
 			Value: 60,
 			Usage: "snmp collect period, in seconds",
 		},
+		cli.BoolFlag{
+			Name:  "pprof",
+			Usage: "start profiling server on :6060",
+		},
 		cli.StringFlag{
 			Name:  "log",
 			Value: "",
@@ -244,7 +264,6 @@ func main() {
 	}
 	myApp.Action = func(c *cli.Context) error {
 		config := Config{}
-
 		config.Listen = c.String("listen")
 		config.Target = c.String("target")
 		config.Key = c.String("key")
@@ -267,6 +286,7 @@ func main() {
 		config.Log = c.String("log")
 		config.SnmpLog = c.String("snmplog")
 		config.SnmpPeriod = c.Int("snmpperiod")
+		config.Pprof = c.Bool("pprof")
 
 		if c.String("c") != "" {
 			//Now only support json config file
@@ -384,9 +404,9 @@ func main() {
 
 		switch config.Mode {
 		case "normal":
-			config.NoDelay, config.Interval, config.Resend, config.NoCongestion = 0, 30, 2, 1
+			config.NoDelay, config.Interval, config.Resend, config.NoCongestion = 0, 40, 2, 1
 		case "fast":
-			config.NoDelay, config.Interval, config.Resend, config.NoCongestion = 0, 20, 2, 1
+			config.NoDelay, config.Interval, config.Resend, config.NoCongestion = 0, 30, 2, 1
 		case "fast2":
 			config.NoDelay, config.Interval, config.Resend, config.NoCongestion = 1, 20, 2, 1
 		case "fast3":
@@ -440,6 +460,7 @@ func main() {
 		log.Println("keepalive:", config.KeepAlive)
 		log.Println("snmplog:", config.SnmpLog)
 		log.Println("snmpperiod:", config.SnmpPeriod)
+		log.Println("pprof:", config.Pprof)
 
 		if err := lis.SetDSCP(config.DSCP); err != nil {
 			log.Println("SetDSCP:", err)
@@ -452,11 +473,16 @@ func main() {
 		}
 
 		go snmpLogger(config.SnmpLog, config.SnmpPeriod)
+		if config.Pprof {
+			go http.ListenAndServe(":6060", nil)
+		}
 		go parentMonitor(3)
+
 		for {
 			if conn, err := lis.AcceptKCP(); err == nil {
 				log.Println("remote address:", conn.RemoteAddr())
 				conn.SetStreamMode(true)
+				conn.SetWriteDelay(true)
 				conn.SetNoDelay(config.NoDelay, config.Interval, config.Resend, config.NoCongestion)
 				conn.SetMtu(config.MTU)
 				conn.SetWindowSize(config.SndWnd, config.RcvWnd)
