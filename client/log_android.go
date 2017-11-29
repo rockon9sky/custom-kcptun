@@ -20,6 +20,7 @@ adb logcat GoLog:I *:S
 /*
 #cgo LDFLAGS: -landroid -llog
 
+#include <stdlib.h>
 #include <android/log.h>
 #include <string.h>
 */
